@@ -882,6 +882,7 @@
         const LIVE_STATUS_WORKER_URL =
             "https://twoface-live-checker.twofaceholder.workers.dev";
         const FORCE_TEST_LIVE = false;
+        const DEBUG_LIVE_STATUS = false; // set true to log the raw Worker JSON in the console
         const NORMAL_FAVICON_URL = "Icon.png";
         const LIVE_FAVICON_URL = "LiveIcon.png";
         const DISCORD_INVITE_CODE = "NU8pPas52k";
@@ -1117,6 +1118,34 @@
             return value === true || value === 1 || value === "true";
         }
 
+        /**
+         * Returns the first value that is actually present.
+         * Unlike a plain truthy check, this keeps 0 (a real viewer count).
+         */
+        function pickValue(...values) {
+            for (const v of values) {
+                if (v !== undefined && v !== null && v !== "" && v !== "--") {
+                    return v;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Turns things like 142, "142", "1,234" into a number.
+         * Returns null if it can't be parsed.
+         */
+        function parseCount(value) {
+            if (value === null || value === undefined) return null;
+            if (typeof value === "number") {
+                return Number.isFinite(value) ? value : null;
+            }
+            const cleaned = String(value).replace(/[,\s]/g, "");
+            if (cleaned === "") return null;
+            const n = Number(cleaned);
+            return Number.isFinite(n) ? n : null;
+        }
+
         function updateLiveLinks(data) {
             const youtubeLink = document.getElementById("youtube-link");
             const tiktokLink = document.getElementById("tiktok-link");
@@ -1171,76 +1200,91 @@
             }
         }
 
-	function renderLiveStatus(data) {
-                const youtubeCount = document.getElementById("youtube-count");
-                const tiktokCount = document.getElementById("tiktok-count");
-                const youtubeBadge = document.getElementById("youtube-live-badge");
-                const tiktokBadge = document.getElementById("tiktok-live-badge");
-                
-                const youtubeViewers = document.getElementById("youtube-viewers");
-                const tiktokViewers = document.getElementById("tiktok-viewers");
-                const youtubeDot = document.getElementById("youtube-status-dot");
-                const tiktokDot = document.getElementById("tiktok-status-dot");
+        function setCountText(element, rawValue, defaultText = "") {
+            if (!element) return;
 
-                updateLiveLinks(data);
+            const n = parseCount(rawValue);
 
-                const ytLive = isLiveValue(data.isLive);
-                const tkLive = isLiveValue(data.tiktokLive);
-                updateFavicon(ytLive || tkLive);
+            if (n === null) {
+                element.textContent = defaultText;
+                element.classList.remove("shrink-text");
+                return;
+            }
 
-                function formatAndResize(element, rawValue, defaultText = "") {
-                    if (!element) return;
-                    if (!rawValue || rawValue === "--") {
-                        element.textContent = defaultText;
-                        element.classList.remove("shrink-text");
-                        return;
-                    }
+            if (n >= 10000) {
+                element.textContent = n.toLocaleString();
+                element.classList.add("shrink-text");
+            } else {
+                element.textContent = String(n);
+                element.classList.remove("shrink-text");
+            }
+        }
 
-                    const num = Number(rawValue);
-                    let formatted = rawValue.toString();
+        function setViewerCount(element, isLive, rawValue) {
+            if (!element) return;
 
-                    if (num >= 10000) {
-                        formatted = num.toLocaleString();
-                        element.classList.add("shrink-text");
-                    } else {
-                        element.classList.remove("shrink-text");
-                    }
+            // Shows 0 as a real value; only hides when offline or value is missing.
+            if (isLive && parseCount(rawValue) !== null) {
+                setCountText(element, rawValue);
+            } else {
+                element.textContent = "";
+                element.classList.remove("shrink-text");
+            }
+        }
 
-                    element.textContent = formatted;
-                }
+        function renderLiveStatus(data) {
+            const youtubeCount = document.getElementById("youtube-count");
+            const tiktokCount = document.getElementById("tiktok-count");
+            const youtubeBadge = document.getElementById("youtube-live-badge");
+            const tiktokBadge = document.getElementById("tiktok-live-badge");
 
-                formatAndResize(youtubeCount, data.subs, "--");
-                formatAndResize(tiktokCount, data.tiktok, "--");
+            const youtubeViewers = document.getElementById("youtube-viewers");
+            const tiktokViewers = document.getElementById("tiktok-viewers");
+            const youtubeDot = document.getElementById("youtube-status-dot");
+            const tiktokDot = document.getElementById("tiktok-status-dot");
 
-                if (youtubeBadge) youtubeBadge.classList.toggle("is-live", ytLive);
-                if (youtubeDot) {
-                    youtubeDot.classList.toggle("dot-red", ytLive);
-                    youtubeDot.classList.toggle("dot-gray", !ytLive);
-                    youtubeDot.classList.toggle("is-hidden", !ytLive);
-                }
-                if (youtubeViewers) {
-                    if (ytLive && data.youtubeViewers) {
-                        formatAndResize(youtubeViewers, data.youtubeViewers);
-                    } else {
-                        youtubeViewers.textContent = "";
-                        youtubeViewers.classList.remove("shrink-text");
-                    }
-                }
+            if (DEBUG_LIVE_STATUS) {
+                console.log("Live status payload:", data);
+            }
 
-                if (tiktokBadge) tiktokBadge.classList.toggle("is-live", tkLive);
-                if (tiktokDot) {
-                    tiktokDot.classList.toggle("dot-red", tkLive);
-                    tiktokDot.classList.toggle("dot-gray", !tkLive);
-                    tiktokDot.classList.toggle("is-hidden", !tkLive);
-                }
-                if (tiktokViewers) {
-                    if (tkLive && data.tiktokViewers) {
-                        formatAndResize(tiktokViewers, data.tiktokViewers);
-                    } else {
-                        tiktokViewers.textContent = "";
-                        tiktokViewers.classList.remove("shrink-text");
-                    }
-                }
+            updateLiveLinks(data);
+
+            const ytLive = isLiveValue(data.isLive);
+            const tkLive = isLiveValue(
+                pickValue(data.tiktokLive, data.tiktok_live, data.tiktokIsLive)
+            );
+            updateFavicon(ytLive || tkLive);
+
+            setCountText(youtubeCount, data.subs, "--");
+            setCountText(tiktokCount, data.tiktok, "--");
+
+            const ytViewerValue = pickValue(
+                data.youtubeViewers,
+                data.youtubeViewerCount,
+                data.youtube_viewers
+            );
+
+            const tkViewerValue = pickValue(
+                data.tiktokViewers,
+                data.tiktokViewerCount,
+                data.tiktok_viewers
+            );
+
+            if (youtubeBadge) youtubeBadge.classList.toggle("is-live", ytLive);
+            if (youtubeDot) {
+                youtubeDot.classList.toggle("dot-red", ytLive);
+                youtubeDot.classList.toggle("dot-gray", !ytLive);
+                youtubeDot.classList.toggle("is-hidden", !ytLive);
+            }
+            setViewerCount(youtubeViewers, ytLive, ytViewerValue);
+
+            if (tiktokBadge) tiktokBadge.classList.toggle("is-live", tkLive);
+            if (tiktokDot) {
+                tiktokDot.classList.toggle("dot-red", tkLive);
+                tiktokDot.classList.toggle("dot-gray", !tkLive);
+                tiktokDot.classList.toggle("is-hidden", !tkLive);
+            }
+            setViewerCount(tiktokViewers, tkLive, tkViewerValue);
         }
 
         async function pollLiveStatus() {
@@ -1258,7 +1302,8 @@
                     };
                 } else {
                     const response = await fetch(LIVE_STATUS_WORKER_URL, {
-                        headers: { Accept: "application/json" }
+                        headers: { Accept: "application/json" },
+                        cache: "no-store"
                     });
 
                     if (!response.ok) {
@@ -1418,11 +1463,8 @@
         (function kickStatus() {
             const KICK_SLUG = "twoface-yda"; 
 
-            
-            function formatCount(el, value) {
-                const n = Number(value);
-                el.textContent = n >= 10000 ? n.toLocaleString() : String(n);
-                el.classList.toggle("shrink-text", n >= 10000);
+            function updateKickCount(el, value) {
+                setCountText(el, value);
             }
 
             async function updateKick() {
@@ -1444,7 +1486,7 @@
                         !!data.livestream && data.livestream.is_live !== false;
 
                     if (data.followers_count != null) {
-                        formatCount(count, data.followers_count);
+                        updateKickCount(count, data.followers_count);
                     }
 
                     if (badge) badge.classList.toggle("is-live", live);
@@ -1455,14 +1497,11 @@
                         dot.classList.toggle("is-hidden", !live);
                     }
 
-                    if (viewers) {
-                        if (live && data.livestream.viewer_count != null) {
-                            formatCount(viewers, data.livestream.viewer_count);
-                        } else {
-                            viewers.textContent = "";
-                            viewers.classList.remove("shrink-text");
-                        }
-                    }
+                    setViewerCount(
+                        viewers,
+                        live,
+                        live ? data.livestream.viewer_count : null
+                    );
                 } catch (err) {
                     console.error("Kick check failed:", err);
                 }
